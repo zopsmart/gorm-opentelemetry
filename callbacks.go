@@ -62,6 +62,7 @@ func extractQuery(tx *gorm.DB) string {
 func (op *OtelPlugin) after(operation string) gormHookFunc {
 	return func(tx *gorm.DB) {
 		span := oteltrace.SpanFromContext(tx.Statement.Context)
+
 		if !span.IsRecording() {
 			// skip the reporting if not recording
 			return

@@ -39,9 +39,11 @@ type TestModel struct {
 }
 
 func initDB() (*gorm.DB, error) {
-	var err error
-	var dbFile *os.File
-	var db *gorm.DB
+	var (
+		err    error
+		dbFile *os.File
+		db     *gorm.DB
+	)
 
 	dbFile, err = ioutil.TempFile("", "db")
 	defer func() {
@@ -56,7 +58,6 @@ func initDB() (*gorm.DB, error) {
 		if db != nil {
 			closeDB(db)
 		}
-
 	}()
 
 	if err != nil {
@@ -85,8 +86,8 @@ func closeDB(db *gorm.DB) {
 	}
 }
 
+// nolint:funlen,gocognit // breaking testCase will break the readability
 func TestPlugin(t *testing.T) {
-
 	testCases := []struct {
 		name         string
 		testOp       func(db *gorm.DB) *gorm.DB
@@ -97,13 +98,8 @@ func TestPlugin(t *testing.T) {
 	}{
 		{
 			"create (insert) row",
-			func(db *gorm.DB) *gorm.DB {
-				return db.Create(&TestModel{Code: "D42", Price: 100})
-			},
-			2,
-			0,
-			"INSERT",
-			1,
+			func(db *gorm.DB) *gorm.DB { return db.Create(&TestModel{Code: "D42", Price: 100}) },
+			2, 0, "INSERT", 1,
 		},
 		{
 			"save (update) row",
@@ -116,10 +112,7 @@ func TestPlugin(t *testing.T) {
 				tm.Code = "foo"
 				return db.Save(&tm)
 			},
-			3,
-			1,
-			"UPDATE",
-			1,
+			3, 1, "UPDATE", 1,
 		},
 		{
 			"delete row",
@@ -131,10 +124,7 @@ func TestPlugin(t *testing.T) {
 				}
 				return db.Delete(&tm)
 			},
-			3,
-			1,
-			"DELETE",
-			1,
+			3, 1, "DELETE", 1,
 		},
 		{
 			"query row",
@@ -146,10 +136,7 @@ func TestPlugin(t *testing.T) {
 				}
 				return db.First(&tm)
 			},
-			3,
-			1,
-			"SELECT",
-			1,
+			3, 1, "SELECT", 1,
 		},
 		{
 			"raw",
@@ -163,10 +150,7 @@ func TestPlugin(t *testing.T) {
 				var result []TestModel
 				return db.Raw("SELECT * FROM test_models").Scan(&result)
 			},
-			3,
-			1,
-			"SELECT",
-			-1,
+			3, 1, "SELECT", -1,
 		},
 		{
 			"row",
@@ -180,10 +164,7 @@ func TestPlugin(t *testing.T) {
 				db.Raw("SELECT id FROM test_models").Row()
 				return &gorm.DB{Error: nil}
 			},
-			3,
-			1,
-			"SELECT",
-			-1,
+			3, 1, "SELECT", -1,
 		},
 	}
 
@@ -226,5 +207,4 @@ func TestPlugin(t *testing.T) {
 			assert.Contains(tt, s.Attributes()[dbStatementKey].AsString(), tc.sqlOp)
 		})
 	}
-
 }
