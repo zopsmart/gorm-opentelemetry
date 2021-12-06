@@ -23,7 +23,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Test
-        run: go test ./...
+        run: |
+          mkdir build
+          go test ./... -short --tags=integration -v -coverprofile build/coverage.txt -coverpkg=./...
+          cat build/coverage.txt | grep -v '.pb.go' > build/coverage.out
+          go tool cover -func build/coverage.out
 
   code_quality:
     name: Code Quality
