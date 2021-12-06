@@ -1,5 +1,13 @@
-on: [push, pull_request]
-name: Test
+name: Workflow-Pipeline
+on:
+  push:
+    branches:
+      - master
+      - development
+  pull_request:
+    branches:
+      - "*"
+
 jobs:
   test:
     strategy:
