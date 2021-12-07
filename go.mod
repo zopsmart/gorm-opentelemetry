@@ -1,4 +1,4 @@
-module developer.zopsmart.com/gorm-opentelemetry
+module github.com/zopsmart/gorm-opentelemetry
 
 go 1.17
 
