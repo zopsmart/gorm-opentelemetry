@@ -23,13 +23,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	// alternative: Instead, the SpanRecorder from the go.opentelemetry.io/otel/sdk/trace/tracetest package can be
-	// registered with the default SDK (go.opentelemetry.io/otel/sdk/trace) as a SpanProcessor and used to test.
-	// This will ensure code will work with the default SDK.
-	"go.opentelemetry.io/otel/oteltest" // nolint:staticcheck //using this pkg for testing purpose.
+	"go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 type TestModel struct {
@@ -89,8 +88,8 @@ func closeDB(db *gorm.DB) {
 // nolint:funlen,gocognit // breaking testCase will break the readability
 func TestPlugin(t *testing.T) {
 	testCases := []struct {
-		name         string
-		testOp       func(db *gorm.DB) *gorm.DB
+		desc   string
+		testOp func(db *gorm.DB) *gorm.DB
 		spans        int
 		targetSpan   int
 		sqlOp        string
@@ -168,20 +167,18 @@ func TestPlugin(t *testing.T) {
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(tt *testing.T) {
+	for i, test := range testCases {
 			db, err := initDB()
 			defer closeDB(db)
 
-			assert.NoError(tt, err)
+			assert.NoError(t, err)
 
-			sr := new(oteltest.SpanRecorder)
-			provider := oteltest.NewTracerProvider(oteltest.WithSpanRecorder(sr))
-
+			sr := tracetest.NewSpanRecorder()
+			provider := trace.NewTracerProvider(trace.WithSpanProcessor(sr))
 			plugin := NewPlugin(WithTracerProvider(provider))
 
 			err = db.Use(plugin)
-			assert.NoError(tt, err)
+			assert.NoError(t, err)
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 			defer cancel()
@@ -190,21 +187,22 @@ func TestPlugin(t *testing.T) {
 
 			db = db.WithContext(ctx)
 			// Create
-			dbOp := tc.testOp(db)
-			assert.NoError(tt, dbOp.Error)
+			dbOp := test.testOp(db)
+			assert.NoError(t, dbOp.Error)
 
 			span.End()
 
-			spans := sr.Completed()
-			require.Len(t, spans, tc.spans)
-			s := spans[tc.targetSpan]
+			spans := sr.Ended()
+			require.Len(t, spans, test.spans)
+			s := spans[test.targetSpan]
 
-			assert.Equal(tt, spans[0].SpanContext().TraceID().String(), spans[1].SpanContext().TraceID().String())
-			assert.Equal(tt, spanName, s.Name())
-			assert.Equal(tt, "test_models", s.Attributes()[dbTableKey].AsString())
-			assert.Equal(tt, tc.sqlOp, s.Attributes()[dbOperationKey].AsString())
-			assert.Equal(tt, tc.affectedRows, s.Attributes()[dbCountKey].AsInt64())
-			assert.Contains(tt, s.Attributes()[dbStatementKey].AsString(), tc.sqlOp)
-		})
+			attributes := s.Attributes()
+
+			assert.Equal(t, spanName, s.Name(), "TEST[%v] %v",i,test.desc)
+			assert.Equal(t, spans[0].SpanContext().TraceID().String(), spans[1].SpanContext().TraceID().String(),attributes,"TEST[%v] %v",i,test.desc)
+			assert.Equal(t, "test_models", attributes[0].Value.AsString(),"TEST[%v] %v",i,test.desc)
+			assert.Contains(t, attributes[1].Value.AsString(), test.sqlOp,"TEST[%v] %v",i,test.desc)
+			assert.Equal(t, test.sqlOp, attributes[2].Value.AsString(),"TEST[%v] %v",i,test.desc)
+			assert.Equal(t, test.affectedRows, attributes[3].Value.AsInt64(),"TEST[%v] %v",i,test.desc)
 	}
 }
