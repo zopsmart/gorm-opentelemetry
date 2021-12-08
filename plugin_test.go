@@ -88,8 +88,8 @@ func closeDB(db *gorm.DB) {
 // nolint:funlen,gocognit // breaking testCase will break the readability
 func TestPlugin(t *testing.T) {
 	testCases := []struct {
-		desc   string
-		testOp func(db *gorm.DB) *gorm.DB
+		desc         string
+		testOp       func(db *gorm.DB) *gorm.DB
 		spans        int
 		targetSpan   int
 		sqlOp        string
@@ -168,41 +168,44 @@ func TestPlugin(t *testing.T) {
 	}
 
 	for i, test := range testCases {
-			db, err := initDB()
-			defer closeDB(db)
+		db, err := initDB()
+		defer closeDB(db)
 
-			assert.NoError(t, err)
+		assert.NoError(t, err)
 
-			sr := tracetest.NewSpanRecorder()
-			provider := trace.NewTracerProvider(trace.WithSpanProcessor(sr))
-			plugin := NewPlugin(WithTracerProvider(provider))
+		sr := tracetest.NewSpanRecorder()
+		provider := trace.NewTracerProvider(trace.WithSpanProcessor(sr))
+		plugin := NewPlugin(WithTracerProvider(provider))
 
-			err = db.Use(plugin)
-			assert.NoError(t, err)
+		err = db.Use(plugin)
+		assert.NoError(t, err)
 
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-			defer cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+		defer cancel()
 
-			ctx, span := provider.Tracer(defaultTracerName).Start(ctx, "gorm-test")
+		ctx, span := provider.Tracer(defaultTracerName).Start(ctx, "gorm-test")
 
-			db = db.WithContext(ctx)
-			// Create
-			dbOp := test.testOp(db)
-			assert.NoError(t, dbOp.Error)
+		db = db.WithContext(ctx)
+		// Create
+		dbOp := test.testOp(db)
+		assert.NoError(t, dbOp.Error)
 
-			span.End()
+		span.End()
 
-			spans := sr.Ended()
-			require.Len(t, spans, test.spans)
-			s := spans[test.targetSpan]
+		spans := sr.Ended()
+		require.Len(t, spans, test.spans)
+		s := spans[test.targetSpan]
 
-			attributes := s.Attributes()
+		attributes := s.Attributes()
 
-			assert.Equal(t, spanName, s.Name(), "TEST[%v] %v",i,test.desc)
-			assert.Equal(t, spans[0].SpanContext().TraceID().String(), spans[1].SpanContext().TraceID().String(),attributes,"TEST[%v] %v",i,test.desc)
-			assert.Equal(t, "test_models", attributes[0].Value.AsString(),"TEST[%v] %v",i,test.desc)
-			assert.Contains(t, attributes[1].Value.AsString(), test.sqlOp,"TEST[%v] %v",i,test.desc)
-			assert.Equal(t, test.sqlOp, attributes[2].Value.AsString(),"TEST[%v] %v",i,test.desc)
-			assert.Equal(t, test.affectedRows, attributes[3].Value.AsInt64(),"TEST[%v] %v",i,test.desc)
+		traceID1 := spans[0].SpanContext().TraceID().String()
+		traceID2 := spans[1].SpanContext().TraceID().String()
+
+		assert.Equal(t, traceID1, traceID2, attributes, "TEST[%v] %v", i, test.desc)
+		assert.Equal(t, spanName, s.Name(), "TEST[%v] %v", i, test.desc)
+		assert.Equal(t, "test_models", attributes[0].Value.AsString(), "TEST[%v] %v", i, test.desc)
+		assert.Contains(t, attributes[1].Value.AsString(), test.sqlOp, "TEST[%v] %v", i, test.desc)
+		assert.Equal(t, test.sqlOp, attributes[2].Value.AsString(), "TEST[%v] %v", i, test.desc)
+		assert.Equal(t, test.affectedRows, attributes[3].Value.AsInt64(), "TEST[%v] %v", i, test.desc)
 	}
 }
