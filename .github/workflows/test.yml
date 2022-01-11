@@ -25,8 +25,7 @@ jobs:
       - name: Test
         run: |
           mkdir build
-          go test ./... -short --tags=integration -v -coverprofile build/coverage.txt -coverpkg=./...
-          cat build/coverage.txt | grep -v '.pb.go' > build/coverage.out
+          go test ./... -v -coverprofile build/coverage.out -coverpkg=./...
           go tool cover -func build/coverage.out
 
   code_quality:
