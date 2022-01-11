@@ -23,10 +23,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"go.opentelemetry.io/otel/oteltest"
+	"go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 type TestModel struct {
@@ -36,9 +38,11 @@ type TestModel struct {
 }
 
 func initDB() (*gorm.DB, error) {
-	var err error
-	var dbFile *os.File
-	var db *gorm.DB
+	var (
+		err    error
+		dbFile *os.File
+		db     *gorm.DB
+	)
 
 	dbFile, err = ioutil.TempFile("", "db")
 	defer func() {
@@ -53,7 +57,6 @@ func initDB() (*gorm.DB, error) {
 		if db != nil {
 			closeDB(db)
 		}
-
 	}()
 
 	if err != nil {
@@ -82,10 +85,10 @@ func closeDB(db *gorm.DB) {
 	}
 }
 
+// nolint:funlen,gocognit // breaking testCase will break the readability
 func TestPlugin(t *testing.T) {
-
 	testCases := []struct {
-		name         string
+		desc         string
 		testOp       func(db *gorm.DB) *gorm.DB
 		spans        int
 		targetSpan   int
@@ -94,13 +97,8 @@ func TestPlugin(t *testing.T) {
 	}{
 		{
 			"create (insert) row",
-			func(db *gorm.DB) *gorm.DB {
-				return db.Create(&TestModel{Code: "D42", Price: 100})
-			},
-			2,
-			0,
-			"INSERT",
-			1,
+			func(db *gorm.DB) *gorm.DB { return db.Create(&TestModel{Code: "D42", Price: 100}) },
+			2, 0, "INSERT", 1,
 		},
 		{
 			"save (update) row",
@@ -113,10 +111,7 @@ func TestPlugin(t *testing.T) {
 				tm.Code = "foo"
 				return db.Save(&tm)
 			},
-			3,
-			1,
-			"UPDATE",
-			1,
+			3, 1, "UPDATE", 1,
 		},
 		{
 			"delete row",
@@ -128,10 +123,7 @@ func TestPlugin(t *testing.T) {
 				}
 				return db.Delete(&tm)
 			},
-			3,
-			1,
-			"DELETE",
-			1,
+			3, 1, "DELETE", 1,
 		},
 		{
 			"query row",
@@ -143,10 +135,7 @@ func TestPlugin(t *testing.T) {
 				}
 				return db.First(&tm)
 			},
-			3,
-			1,
-			"SELECT",
-			1,
+			3, 1, "SELECT", 1,
 		},
 		{
 			"raw",
@@ -160,10 +149,7 @@ func TestPlugin(t *testing.T) {
 				var result []TestModel
 				return db.Raw("SELECT * FROM test_models").Scan(&result)
 			},
-			3,
-			1,
-			"SELECT",
-			-1,
+			3, 1, "SELECT", -1,
 		},
 		{
 			"row",
@@ -177,51 +163,49 @@ func TestPlugin(t *testing.T) {
 				db.Raw("SELECT id FROM test_models").Row()
 				return &gorm.DB{Error: nil}
 			},
-			3,
-			1,
-			"SELECT",
-			-1,
+			3, 1, "SELECT", -1,
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(tt *testing.T) {
-			db, err := initDB()
-			defer closeDB(db)
+	for i, test := range testCases {
+		db, err := initDB()
+		defer closeDB(db)
 
-			assert.NoError(tt, err)
+		assert.NoError(t, err)
 
-			sr := new(oteltest.StandardSpanRecorder)
-			provider := oteltest.NewTracerProvider(oteltest.WithSpanRecorder(sr))
+		sr := tracetest.NewSpanRecorder()
+		provider := trace.NewTracerProvider(trace.WithSpanProcessor(sr))
+		plugin := NewPlugin(WithTracerProvider(provider))
 
-			plugin := NewPlugin(WithTracerProvider(provider))
+		err = db.Use(plugin)
+		assert.NoError(t, err)
 
-			err = db.Use(plugin)
-			assert.NoError(tt, err)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+		defer cancel()
 
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-			defer cancel()
+		ctx, span := provider.Tracer(defaultTracerName).Start(ctx, "gorm-test")
 
-			ctx, span := provider.Tracer(defaultTracerName).Start(ctx, "gorm-test")
+		db = db.WithContext(ctx)
+		// Create
+		dbOp := test.testOp(db)
+		assert.NoError(t, dbOp.Error)
 
-			db = db.WithContext(ctx)
-			// Create
-			dbOp := tc.testOp(db)
-			assert.NoError(tt, dbOp.Error)
+		span.End()
 
-			span.End()
+		spans := sr.Ended()
+		require.Len(t, spans, test.spans)
+		s := spans[test.targetSpan]
 
-			spans := sr.Completed()
-			require.Len(t, spans, tc.spans)
-			s := spans[tc.targetSpan]
+		attributes := s.Attributes()
 
-			assert.Equal(tt, spans[0].SpanContext().TraceID, spans[1].SpanContext().TraceID)
-			assert.Equal(tt, spanName, s.Name())
-			assert.Equal(tt, "test_models", s.Attributes()[dbTableKey].AsString())
-			assert.Equal(tt, tc.sqlOp, s.Attributes()[dbOperationKey].AsString())
-			assert.Equal(tt, tc.affectedRows, s.Attributes()[dbCountKey].AsInt64())
-			assert.Contains(tt, s.Attributes()[dbStatementKey].AsString(), tc.sqlOp)
-		})
+		traceID1 := spans[0].SpanContext().TraceID().String()
+		traceID2 := spans[1].SpanContext().TraceID().String()
+
+		assert.Equal(t, traceID1, traceID2, attributes, "TEST[%v] %v", i, test.desc)
+		assert.Equal(t, spanName, s.Name(), "TEST[%v] %v", i, test.desc)
+		assert.Equal(t, "test_models", attributes[0].Value.AsString(), "TEST[%v] %v", i, test.desc)
+		assert.Contains(t, attributes[1].Value.AsString(), test.sqlOp, "TEST[%v] %v", i, test.desc)
+		assert.Equal(t, test.sqlOp, attributes[2].Value.AsString(), "TEST[%v] %v", i, test.desc)
+		assert.Equal(t, test.affectedRows, attributes[3].Value.AsInt64(), "TEST[%v] %v", i, test.desc)
 	}
-
 }

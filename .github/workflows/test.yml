@@ -1,10 +1,18 @@
-on: [push, pull_request]
-name: Test
+name: Workflow-Pipeline
+on:
+  push:
+    branches:
+      - master
+      - development
+  pull_request:
+    branches:
+      - "*"
+
 jobs:
   test:
     strategy:
       matrix:
-        go-version: [1.14.x, 1.15.x]
+        go-version: [1.17.x]
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
@@ -15,4 +23,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Test
-        run: go test ./...
+        run: |
+          mkdir build
+          go test ./... -v -coverprofile build/coverage.out -coverpkg=./...
+          go tool cover -func build/coverage.out
+
+  code_quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    container: "golangci/golangci-lint:v1.43.0"
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v2
+      - name: Get dependencies
+        run: |
+          git config --global url."https://${{ secrets.PAT}}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+          git config --global http.sslVerify false
+          go get -v -t -d ./...
+      - name: GolangCI-Lint
+        run: |
+          golangci-lint run --timeout 5m0s

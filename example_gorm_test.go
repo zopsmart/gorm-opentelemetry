@@ -36,6 +36,7 @@ func ExampleNewPlugin() {
 	plugin := NewPlugin(
 	// include any options here
 	)
+
 	err = db.Use(plugin)
 	if err != nil {
 		panic("failed configuring plugin")
@@ -52,6 +53,7 @@ func ExampleNewPlugin() {
 
 	// Read
 	var product Product
+
 	db.First(&product, 1)                 // find product with integer primary key
 	db.First(&product, "code = ?", "D42") // find product with code D42
 }
