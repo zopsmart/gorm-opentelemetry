@@ -15,7 +15,7 @@ linters-settings:
   lll:
     line-length: 140
   goimports:
-    local-prefixes: github.com/zopsmart
+    local-prefixes: github.com/zopsmart/gorm-opentelemetry
   gocritic:
     enabled-tags:
       - diagnostic
